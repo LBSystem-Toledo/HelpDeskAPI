@@ -7,348 +7,23 @@ using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.Data;
-using System.Data.SqlClient;
 using System.Linq;
 using System.Net.Http;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading.Tasks;
-using static Dapper.SqlMapper;
 
 namespace HelpDeskAPI.DAO.Repository
 {
-    class BoletoPdfInter
+    class BoletoPdf
     {
         public string pdf { get; set; } = string.Empty;
     }
 
-    public class HelpDeskDAO: IHelpDesk
+    public class HelpDeskDAO : IHelpDesk
     {
         readonly IConfiguration _config;
         public HelpDeskDAO(IConfiguration config) { _config = config; }
-
-        public async Task<bool> ValidarEmpresaMobileAsync(string Nr_doc)
-        {
-            try
-            {
-                StringBuilder sql = new StringBuilder();
-                sql.AppendLine("select 1 from TB_CRM_Cliente a ")
-                    .AppendLine("where isnull(a.st_registro, 'A') <> 'I' ")
-                    .AppendLine("and isnull(a.mobile, 0) = 1 ")
-                    .AppendLine("and dbo.FVALIDA_NUMEROS(a.cnpj) = '" + Nr_doc.SoNumero() + "'");
-                using (TConexao conexao = new TConexao(_config.GetConnectionString("conexaoHelp")))
-                {
-                    if (await conexao.OpenConnectionAsync())
-                        return await conexao._conexao.ExecuteScalarAsync<bool>(sql.ToString());
-                    else return false;
-                }
-            }
-            catch { return false; }
-        }
-
-        public async Task<int> TerminaisMobileAsync(string Nr_doc)
-        {
-            try
-            {
-                StringBuilder sql = new StringBuilder();
-                sql.AppendLine("select qt_mobile from TB_CRM_Cliente a ")
-                    .AppendLine("where isnull(a.st_registro, 'A') <> 'I' ")
-                    .AppendLine("and isnull(a.mobile, 0) = 1 ")
-                    .AppendLine("and dbo.FVALIDA_NUMEROS(a.cnpj) = '" + Nr_doc.SoNumero() + "'");
-                using (TConexao conexao = new TConexao(_config.GetConnectionString("conexaoHelp")))
-                {
-                    if (await conexao.OpenConnectionAsync())
-                        return await conexao._conexao.ExecuteScalarAsync<int>(sql.ToString());
-                    else return 0;
-                }
-            }
-            catch { return 0; }
-        }
-
-        public async Task NovoTicketAsync(Ticket ticket)
-        {
-            SqlTransaction t = null;
-            try
-            {
-                using (TConexao conexao = new TConexao(_config.GetConnectionString("conexaoHelp")))
-                {
-                    if (await conexao.OpenConnectionAsync())
-                    {
-                        t = conexao._conexao.BeginTransaction(IsolationLevel.ReadCommitted);
-                        decimal etapa = await conexao._conexao.ExecuteScalarAsync<decimal>("select top 1 a.id_etapa from tb_crm_etapa a where isnull(a.st_abertura, 'N') = 'S'", transaction: t);
-                        //Gravar Ticket
-                        DynamicParameters p = new DynamicParameters();
-                        p.Add("@P_ID_TICKET", dbType: DbType.Decimal, direction: ParameterDirection.Output);
-                        p.Add("@P_LOGINCLIENTE", ticket.Logincliente, dbType: DbType.String, size: 20);
-                        p.Add("@P_ID_CLIENTE", ticket.Id_cliente, dbType: DbType.Decimal);
-                        p.Add("@P_ST_PRIORIDADE", ticket.St_prioridade, dbType: DbType.String, size: 1);
-                        p.Add("@P_DS_ASSUNTO", ticket.Ds_assunto, dbType: DbType.String, size: 50);
-                        if (ticket.Dt_abertura.HasValue)
-                            p.Add("@P_DT_ABERTURA", ticket.Dt_abertura.Value, dbType: DbType.DateTime);
-                        else p.Add("@P_DT_ABERTURA", null);
-                        if (ticket.Dt_concluido.HasValue)
-                            p.Add("@P_DT_CONCLUIDO", ticket.Dt_concluido.Value, dbType: DbType.DateTime);
-                        else p.Add("@P_DT_CONCLUIDO", null);
-                        if (ticket.Dt_encerrado.HasValue)
-                            p.Add("@P_DT_ENCERRAMENTO", ticket.Dt_encerrado.Value, dbType: DbType.DateTime);
-                        else p.Add("@P_DT_ENCERRAMENTO", null);
-                        p.Add("@P_ST_REGISTRO", ticket.St_registro, dbType: DbType.String, size: 1);
-                        p.Add("@P_SCOREAVALIACAO", null);
-                        p.Add("@P_OBSAVALIACAO", null);
-                        await conexao._conexao.ExecuteAsync("IA_CRM_TICKET", p, transaction: t, commandType: CommandType.StoredProcedure);
-                        ticket.Id_ticket = p.Get<decimal>("@P_ID_TICKET");
-                        //Gravar evolucao
-                        p = new DynamicParameters();
-                        p.Add("@P_ID_EVOLUCAO", dbType: DbType.Decimal, direction: ParameterDirection.Output);
-                        p.Add("@P_ID_TICKET", ticket.Id_ticket, dbType: DbType.Decimal);
-                        p.Add("@P_LOGINOPERADOR", null);
-                        p.Add("@P_ID_ETAPA", etapa, dbType: DbType.Decimal);
-                        p.Add("@P_DT_INIETAPA", DateTime.Now, dbType: DbType.DateTime);
-                        p.Add("@P_DT_FINETAPA", null);
-                        await conexao._conexao.ExecuteAsync("IA_CRM_EVOLUCAOTICKET", p, transaction: t, commandType: CommandType.StoredProcedure);
-                        decimal id_evolucao = p.Get<decimal>("@P_ID_EVOLUCAO");
-                        //Gravar Historico Evolucao
-                        p = new DynamicParameters();
-                        p.Add("@P_ID_EVOLUCAO", id_evolucao, dbType: DbType.Decimal);
-                        p.Add("@P_ID_TICKET", ticket.Id_ticket, dbType: DbType.Decimal);
-                        p.Add("@P_ID_HISTORICO", null);
-                        p.Add("@P_LOGINCLIENTE", ticket.Logincliente, dbType: DbType.String, size: 20);
-                        p.Add("@P_ID_CLIENTE", ticket.Id_cliente, dbType: DbType.Decimal);
-                        p.Add("@P_LOGINOPERADOR", null);
-                        p.Add("@P_DS_HISTORICO", ticket.Ds_historico, dbType: DbType.String, size: 2048);
-                        await conexao._conexao.ExecuteAsync("IA_CRM_HISTEVOLUCAO", p, transaction: t, commandType: CommandType.StoredProcedure);
-                        //Anexos
-                        if(ticket.lAnexo != null)
-                            foreach(var v in ticket.lAnexo)
-                            {
-                                p = new DynamicParameters();
-                                p.Add("@P_ID_EVOLUCAO", id_evolucao, dbType: DbType.Decimal);
-                                p.Add("@P_ID_TICKET", ticket.Id_ticket, dbType: DbType.Decimal);
-                                p.Add("@P_ID_ANEXO", null);
-                                p.Add("@P_DS_ANEXO", v.Ds_anexo, dbType: DbType.String, size: 255);
-                                p.Add("@P_IMAGEM", v.Imagem, dbType: DbType.Binary);
-                                p.Add("@P_TP_EXT", v.Tp_ext, dbType: DbType.String, size: 10);
-                                await conexao._conexao.ExecuteAsync("IA_CRM_ANEXOEVOLUCAO", p, transaction: t, commandType: CommandType.StoredProcedure);
-                            };
-                        t.Commit();
-                    }
-                }
-            }
-            catch { t.Rollback(); }
-        }
-
-        public async Task NovoHistoricoAsync(HistEvolucao historico)
-        {
-            SqlTransaction t = null;
-            try
-            {
-                using (TConexao conexao = new TConexao(_config.GetConnectionString("conexaoHelp")))
-                {
-                    if (await conexao.OpenConnectionAsync())
-                    {
-                        t = conexao._conexao.BeginTransaction(IsolationLevel.ReadCommitted);
-                        //Gravar historico
-                        DynamicParameters p = new DynamicParameters();
-                        p.Add("@P_ID_HISTORICO", dbType: DbType.Decimal, direction: ParameterDirection.Output);
-                        p.Add("@P_ID_EVOLUCAO", historico.Id_evolucao, dbType: DbType.Decimal);
-                        p.Add("@P_ID_TICKET", historico.Id_ticket, dbType: DbType.Decimal);
-                        p.Add("@P_LOGINCLIENTE", historico.Logincliente, dbType: DbType.String, size: 20);
-                        p.Add("@P_ID_CLIENTE", Convert.ToInt32(historico.Id_cliente), dbType: DbType.Decimal);
-                        p.Add("@P_LOGINOPERADOR", null);
-                        p.Add("@P_DS_HISTORICO", historico.Ds_historico, dbType: DbType.String, size: 2048);
-                        await conexao._conexao.ExecuteAsync("IA_CRM_HISTEVOLUCAO", p, transaction: t, commandType: CommandType.StoredProcedure);
-                        //Anexos
-                        if (historico.lAnexo != null)
-                            foreach (var v in historico.lAnexo)
-                            {
-                                p = new DynamicParameters();
-                                p.Add("@P_ID_EVOLUCAO", historico.Id_evolucao, dbType: DbType.Decimal);
-                                p.Add("@P_ID_TICKET", historico.Id_ticket, dbType: DbType.Decimal);
-                                p.Add("@P_ID_ANEXO", null);
-                                p.Add("@P_DS_ANEXO", v.Ds_anexo, dbType: DbType.String, size: 255);
-                                p.Add("@P_IMAGEM", v.Imagem, dbType: DbType.Binary);
-                                p.Add("@P_TP_EXT", v.Tp_ext, dbType: DbType.String, size: 10);
-                                await conexao._conexao.ExecuteAsync("IA_CRM_ANEXOEVOLUCAO", p, transaction: t, commandType: CommandType.StoredProcedure);
-                            };
-                        t.Commit();
-                    }
-                }
-            }
-            catch { t.Rollback(); }
-        }
-
-        public async Task EvoluirTicketClienteAsync(HistEvolucao evolucao)
-        {
-            SqlTransaction t = null;
-            try
-            {
-                using (TConexao conexao = new TConexao(_config.GetConnectionString("conexaoHelp")))
-                {
-                    if (await conexao.OpenConnectionAsync())
-                    {
-                        t = conexao._conexao.BeginTransaction(IsolationLevel.ReadCommitted);
-                        decimal etapa = await conexao._conexao.ExecuteScalarAsync<decimal>("select top 1 id_etapa from tb_crm_etapa where " + (evolucao.Concluir ? "st_concluir = 'S'" : "st_repcliente = 1"), transaction: t);
-                        //Gravar Ticket
-                        DynamicParameters p = new DynamicParameters();
-                        p.Add("@P_ID_EVOLUCAO", dbType: DbType.Decimal, direction: ParameterDirection.Output);
-                        p.Add("@P_ID_TICKET", evolucao.Id_ticket, dbType: DbType.Decimal);
-                        p.Add("@P_LOGINOPERADOR", null);
-                        p.Add("@P_ID_ETAPA", etapa);
-                        p.Add("@P_DT_INIETAPA", DateTime.Now, dbType: DbType.DateTime);
-                        if (evolucao.Concluir)
-                            p.Add("@P_DT_FINETAPA", DateTime.Now, dbType: DbType.Date);
-                        else p.Add("@P_DT_FINETAPA", null);
-                        await conexao._conexao.ExecuteAsync("IA_CRM_EVOLUCAOTICKET", p, transaction: t, commandType: CommandType.StoredProcedure);
-                        decimal id_evolucao = p.Get<decimal>("@P_ID_EVOLUCAO");
-                        //Gravar Historico Evolucao
-                        p = new DynamicParameters();
-                        p.Add("@P_ID_EVOLUCAO", id_evolucao, dbType: DbType.Decimal);
-                        p.Add("@P_ID_TICKET", evolucao.Id_ticket, dbType: DbType.Decimal);
-                        p.Add("@P_ID_HISTORICO", null);
-                        p.Add("@P_LOGINCLIENTE", evolucao.Logincliente, dbType: DbType.String, size: 20);
-                        p.Add("@P_ID_CLIENTE", evolucao.Id_cliente, dbType: DbType.Decimal);
-                        p.Add("@P_LOGINOPERADOR", null);
-                        p.Add("@P_DS_HISTORICO", evolucao.Ds_historico, dbType: DbType.String, size: 2048);
-                        await conexao._conexao.ExecuteAsync("IA_CRM_HISTEVOLUCAO", p, transaction: t, commandType: CommandType.StoredProcedure);
-                        //Alterar status do ticket
-                        if (evolucao.Concluir &&
-                            !string.IsNullOrEmpty(evolucao.ScoreAvaliacao))
-                        {
-                            //Gravar avaliação
-                            StringBuilder sql = new StringBuilder();
-                            sql.AppendLine("update TB_CRM_Ticket set ScoreAvaliacao = @ScoreAvaliacao, ")
-                                .AppendLine("ObsAvaliacao = @ObsAvaliacao, st_registro = 'L', ")
-                                .AppendLine("dt_alt = getdate() where ID_Ticket = @ID_Ticket");
-                            p = new DynamicParameters();
-                            p.Add("@ScoreAvaliacao", evolucao.ScoreAvaliacao, dbType: DbType.String, size: 1);
-                            p.Add("@ObsAvaliacao", evolucao.ObsAvaliacao, dbType: DbType.String, size: 1024);
-                            p.Add("@ID_Ticket", evolucao.Id_ticket);
-                            await conexao._conexao.ExecuteAsync(sql.ToString(), p, transaction: t, commandType: CommandType.Text);
-                        }
-                        else
-                        {
-                            StringBuilder sql = new StringBuilder();
-                            sql.AppendLine("update TB_CRM_Ticket set st_registro = 'A', dt_alt = getdate() where ID_Ticket = @ID_Ticket");
-                            p = new DynamicParameters();
-                            p.Add("@ID_Ticket", evolucao.Id_ticket, dbType: DbType.Decimal);
-                            await conexao._conexao.ExecuteAsync(sql.ToString(), p, transaction: t, commandType: CommandType.Text);
-                        }
-                        t.Commit();
-                    }
-                }
-            }
-            catch { t.Rollback(); }
-        }
-
-        public async Task<IEnumerable<Ticket>> TicketsERP(string LoginCliente, string Dt_etapa)
-        {
-            try
-            {
-                StringBuilder sql = new StringBuilder();
-                sql.AppendLine("select a.id_ticket, b.DS_ETAPA as DS_EtapaAtual, case when b.ST_Encerrar = 'S' then 1 else 0 end as Encerrado, a.ds_assunto, a.dt_abertura, a.dt_etapaatual")
-                    .AppendLine("from VTB_CRM_TICKET a ")
-                    .AppendLine("left join TB_CRM_ETAPA b ")
-                    .AppendLine("on a.Id_etapaatual = b.ID_ETAPA")
-                    .AppendLine("where a.logincliente = '" + LoginCliente.Trim() + "'")
-                    .AppendLine("and isnull(a.st_registro, 'A') IN('A', 'E')")
-                    .AppendLine("and isnull(b.st_interna, 'N') <> 'S'");
-                DateTime data;
-                if (DateTime.TryParse(Dt_etapa, out data))
-                    sql.AppendLine("and DATEADD(ms, -DATEPART(ms, a.dt_etapaatual), a.dt_etapaatual) > '" + data.ToString("yyyyMMdd HH:mm:ss") + "'");
-                sql.AppendLine("order by a.id_ticket desc ");
-                using (TConexao conexao = new TConexao(_config.GetConnectionString("conexaoHelp")))
-                {
-                    if (await conexao.OpenConnectionAsync())
-                        return await conexao._conexao.QueryAsync<Ticket>(sql.ToString());
-                    else return null;
-                }
-            }
-            catch { return null; }
-        }
-
-        public async Task<string> ValidarLoginAsync(string login, string senha, string Cnpj)
-        {
-            try
-            {
-                StringBuilder sql = new StringBuilder();
-                sql.AppendLine("select a.id_cliente from tb_crm_usercliente a join tb_crm_cliente b on a.id_cliente = b.id_cliente ")
-                    .AppendLine("and dbo.FVALIDA_NUMEROS(b.cnpj) in(" + Cnpj + ") where logincliente = '" + login.Trim() + "' and senha = '" + senha.Trim() + "'");
-                using (TConexao conexao = new TConexao(_config.GetConnectionString("conexaoHelp")))
-                {
-                    if (await conexao.OpenConnectionAsync())
-                        return await conexao._conexao.ExecuteScalarAsync<string>(sql.ToString());
-                    else return string.Empty;
-                }
-            }
-            catch { return string.Empty; }
-        }
-        public async Task<bool> ValidarOperador(string login, string senha)
-        {
-            try
-            {
-                StringBuilder sql = new StringBuilder();
-                sql.AppendLine("select 1 from tb_crm_operador ")
-                    .AppendLine("where loginoperador = '" + login.Trim() + "' and senha = '" + senha.Trim() + "'");
-                using (TConexao conexao = new TConexao(_config.GetConnectionString("conexaoHelp")))
-                {
-                    if (await conexao.OpenConnectionAsync())
-                        return await conexao._conexao.ExecuteScalarAsync<bool>(sql.ToString());
-                    else return false;
-                }
-            }
-            catch { return false; }
-        }
-
-        public async Task<IEnumerable<Evolucao>> BuscarEvolucaoAsync(string id_ticket)
-        {
-            try
-            {
-                StringBuilder sql = new StringBuilder()
-                .AppendLine("select a.id_evolucao, a.id_ticket, a.loginoperador, ")
-                .AppendLine("a.id_etapa, b.ds_etapa, a.dt_inietapa, a.dt_finetapa, ")
-                .AppendLine("Hist.LoginHistorico, Hist.DS_HISTORICO ")
-                .AppendLine("from tb_crm_evolucaoticket a ")
-                .AppendLine("inner join tb_crm_etapa b ")
-                .AppendLine("on a.id_etapa = b.id_etapa ")
-                .AppendLine("outer apply")
-                .AppendLine("(")
-                .AppendLine("	select top 1 isnull(x.LOGINCLIENTE, x.LOGINOPERADOR) as LoginHistorico, x.DS_HISTORICO ")
-                .AppendLine("	from TB_CRM_HISTEVOLUCAO x ")
-                .AppendLine("	where x.ID_TICKET = a.ID_TICKET ")
-                .AppendLine("	and x.ID_EVOLUCAO = a.ID_EVOLUCAO ")
-                .AppendLine("	order by x.DT_CAD asc ")
-                .AppendLine(") as Hist ")
-                .AppendLine("where a.id_ticket = " + id_ticket)
-                .AppendLine("order by a.dt_inietapa desc ");
-                using (TConexao conexao = new TConexao(_config.GetConnectionString("conexaoHelp")))
-                {
-                    if (await conexao.OpenConnectionAsync())
-                        return await conexao._conexao.QueryAsync<Evolucao>(sql.ToString());
-                    else return null;
-                }
-            }
-            catch { return null; }
-        }
-
-        public async Task<IEnumerable<Anexo>> BuscarAnexoAsync(string id_ticket, string id_evolucao)
-        {
-            try
-            {
-                StringBuilder sql = new StringBuilder();
-                sql.AppendLine("select a.id_evolucao, a.id_ticket, a.id_anexo, ");
-                sql.AppendLine("a.ds_anexo, a.imagem, a.tp_ext ");
-                sql.AppendLine("from tb_crm_AnexoEvolucao a ");
-                sql.AppendLine("where a.id_ticket = " + id_ticket);
-                sql.AppendLine("and a.id_evolucao = " + id_evolucao);
-                using (TConexao conexao = new TConexao(_config.GetConnectionString("conexaoHelp")))
-                {
-                    if (await conexao.OpenConnectionAsync())
-                        return await conexao._conexao.QueryAsync<Anexo>(sql.ToString());
-                    else return null;
-                }
-            }
-            catch { return null; }
-        }
 
         public async Task<TChaveLic> CalcularSerial(string cnpj_cliente,
                                                     string dt_servidor,
@@ -359,15 +34,19 @@ namespace HelpDeskAPI.DAO.Repository
             try
             {
                 StringBuilder sql = new StringBuilder();
-                sql.AppendLine("select id_cliente, isnull(qt_diasvalidadelic, 0) as qt_diasvalidadelic, dt_licenca, cnpj, st_registro ");
-                sql.AppendLine("from tb_crm_cliente ");
-                sql.AppendLine("where REPLACE(REPLACE(REPLACE(REPLACE(cnpj, ',',''), '.', ''), '/', ''), '-', '') in(" + cnpj_cliente.Trim() + ")");
-                using (TConexao conexao = new TConexao(_config.GetConnectionString("conexaoHelp")))
+                sql.AppendLine("select IDCLIENTE, isnull(DIASVALLIC, 0) as qt_diasvalidadelic, ")
+                    .AppendLine("DTLICENCA, a.NRDOC, b.NRDOC as DocParceiro")
+                    .AppendLine("from tb_cliente a")
+                    .AppendLine("inner join TB_PARCEIRO b")
+                    .AppendLine("on a.IDPARCEIRO = b.IDPARCEIRO")
+                    .AppendLine("where isnull(a.INATIVO, 0) = 0")
+                    .AppendLine("and dbo.FVALIDA_NUMEROS(a.NRDOC) in(" + cnpj_cliente.SoNumero().Trim() + ")");
+                using (TConexao conexao = new TConexao(_config.GetConnectionString("conexaoCRM")))
                 {
                     if (await conexao.OpenConnectionAsync())
                     {
                         var cliente = await conexao._conexao.QueryFirstOrDefaultAsync<Cliente>(sql.ToString());
-                        if(cliente != null)
+                        if (cliente != null)
                         {
                             //Verificar financeiro em aberto
                             sql.Clear();
@@ -380,8 +59,8 @@ namespace HelpDeskAPI.DAO.Repository
                             sql.AppendLine("where isnull(c.st_registro, 'A') <> 'C' ");
                             sql.AppendLine("and isnull(a.st_registro, 'A') in('A', 'P') ");
                             sql.AppendLine("and convert(datetime, floor(convert(decimal(30,10), dateadd(day, 5, a.dt_vencto)))) < convert(datetime, floor(convert(decimal(30,10), getdate()))) ");
-                            sql.AppendLine("and REPLACE(REPLACE(REPLACE(REPLACE(case when b.tp_pessoa = 'F' then b.nr_cpf else b.nr_cgc end, ',',''), '.', ''), '/', ''), '-', '') = '" + cliente.Cnpj.SoNumero() + "'");
-                            using (TConexao conexaoLB = new TConexao(_config.GetConnectionString("conexaoLB")))
+                            sql.AppendLine("and REPLACE(REPLACE(REPLACE(REPLACE(case when b.tp_pessoa = 'F' then b.nr_cpf else b.nr_cgc end, ',',''), '.', ''), '/', ''), '-', '') = '" + cliente.NrDoc.SoNumero() + "'");
+                            using (TConexao conexaoLB = new TConexao(_config.GetConnectionString(cliente.DocParceiro.SoNumero())))
                             {
                                 if (await conexaoLB.OpenConnectionAsync())
                                     retorno.Status = await conexaoLB._conexao.ExecuteScalarAsync<string>(sql.ToString());
@@ -408,17 +87,17 @@ namespace HelpDeskAPI.DAO.Repository
                                     else retorno.Dt_licenca = cliente.Dt_licenca.Value.ToString("dd/MM/yyyy");
                                 }
                                 retorno.Nr_seqlic = new Random().Next(9999);
-                                retorno.Chave = new Cryptography.Cryptography().GerarChaveAliance(cliente.Cnpj.SoNumero(),
+                                retorno.Chave = new Cryptography.Cryptography().GerarChaveAliance(cliente.NrDoc.SoNumero(),
                                                                                                   Convert.ToDouble(retorno.Nr_seqlic),
-                                                                                                  new DateTime(int.Parse(retorno.Dt_licenca.Substring(6,4)), int.Parse(retorno.Dt_licenca.Substring(3, 2)), int.Parse(retorno.Dt_licenca.Substring(0, 2))),
+                                                                                                  new DateTime(int.Parse(retorno.Dt_licenca.Substring(6, 4)), int.Parse(retorno.Dt_licenca.Substring(3, 2)), int.Parse(retorno.Dt_licenca.Substring(0, 2))),
                                                                                                   retorno.Qt_diasvalidade);
                                 retorno.Status = "0";
                                 DynamicParameters p = new DynamicParameters();
                                 p.Add("@dt_licenca", new DateTime(int.Parse(retorno.Dt_licenca.Substring(6, 4)), int.Parse(retorno.Dt_licenca.Substring(3, 2)), int.Parse(retorno.Dt_licenca.Substring(0, 2))),
                                     dbType: DbType.DateTime);
                                 p.Add("@p_nr_seqlic", retorno.Nr_seqlic, dbType: DbType.Int32);
-                                p.Add("@id_cliente", cliente.Id_cliente, dbType: DbType.Decimal);
-                                await conexao._conexao.ExecuteAsync("update tb_crm_cliente set dt_licenca = @dt_licenca, nr_seqlic = @p_nr_seqlic where id_cliente = @id_cliente", p);
+                                p.Add("@id_cliente", cliente.IdCliente, dbType: DbType.Decimal);
+                                await conexao._conexao.ExecuteAsync("update tb_cliente set DTLICENCA = @dt_licenca, NRSEQLIC = @p_nr_seqlic where IDCLIENTE = @id_cliente", p);
                             }
                         }
                         else retorno.Status = "2";//Cliente inativo
@@ -432,7 +111,7 @@ namespace HelpDeskAPI.DAO.Repository
 
         public async Task<string> GravarRDC(TRegistro_Cad_RDC rdc)
         {
-            SqlTransaction t = null;
+            IDbTransaction t = null;
             try
             {
                 using (TConexao conexao = new TConexao(_config.GetConnectionString("conexaoHelp")))
@@ -442,7 +121,7 @@ namespace HelpDeskAPI.DAO.Repository
                         t = conexao._conexao.BeginTransaction(IsolationLevel.ReadCommitted);
                         //Gravar RDC
                         DynamicParameters p = new DynamicParameters();
-                        p.Add("@P_ID_RDC", string.IsNullOrWhiteSpace(rdc.ID_RDC) ? null : new Guid(rdc.ID_RDC), 
+                        p.Add("@P_ID_RDC", string.IsNullOrWhiteSpace(rdc.ID_RDC) ? null : new Guid(rdc.ID_RDC),
                             dbType: DbType.Guid, direction: ParameterDirection.InputOutput);
                         p.Add("@P_ST_RDC", rdc.ST_RDC, dbType: DbType.String, size: 1);
                         p.Add("@P_DS_RDC", rdc.DS_RDC, dbType: DbType.String, size: 255);
@@ -457,7 +136,7 @@ namespace HelpDeskAPI.DAO.Repository
                         p = new DynamicParameters();
                         p.Add("@P_ID_RDC", rdc.ID_RDC);
                         await conexao._conexao.ExecuteAsync("EXCLUI_BIN_RDCPORRDC", p, transaction: t, commandType: CommandType.StoredProcedure);
-                        foreach(var v in rdc.lCad_DataSource)
+                        foreach (var v in rdc.lCad_DataSource)
                         {
                             p = new DynamicParameters();
                             p.Add("@P_ID_DATASOURCE", string.IsNullOrWhiteSpace(v.ID_DataSource) ? null : new Guid(v.ID_DataSource), dbType: DbType.Guid, direction: ParameterDirection.InputOutput);
@@ -471,7 +150,7 @@ namespace HelpDeskAPI.DAO.Repository
                             p.Add("@P_ST_RDC", rdc.ST_RDC, dbType: DbType.String, size: 1);
                             p.Add("@P_ID_DATASOURCE", new Guid(v.ID_DataSource), dbType: DbType.Guid);
                             await conexao._conexao.ExecuteAsync("IA_BIN_RDC_X_DATASOURCE", p, transaction: t, commandType: CommandType.StoredProcedure);
-                            foreach(var param in v.lCad_ParamClasse)
+                            foreach (var param in v.lCad_ParamClasse)
                             {
                                 //Gravar Parametros
                                 p = new DynamicParameters();
@@ -495,7 +174,7 @@ namespace HelpDeskAPI.DAO.Repository
                     else return "1|Erro abrir conexão banco dados.";
                 }
             }
-            catch(Exception ex) { t.Rollback(); return "1|Erro: " + ex.Message.Trim(); }
+            catch (Exception ex) { t.Rollback(); return "1|Erro: " + ex.Message.Trim(); }
         }
 
         public async Task<string> VerificarVersaoRDC(string Id_rdc,
@@ -588,7 +267,7 @@ namespace HelpDeskAPI.DAO.Repository
                     if (await conexao.OpenConnectionAsync())
                     {
                         var retorno = await conexao._conexao.QueryFirstOrDefaultAsync<TRegistro_Cad_RDC>(sql.ToString());
-                        if(retorno != null)
+                        if (retorno != null)
                         {
                             sql.Clear();
                             sql.AppendLine("select convert(varchar(255), a.id_dts) as ID_DataSource, a.ds_dts as DS_DataSource, a.ds_sql, a.dt_dts as DT_DataSource")
@@ -596,7 +275,7 @@ namespace HelpDeskAPI.DAO.Repository
                                 .AppendLine("where exists(select 1 from tb_bin_rdc_x_datasource x where x.id_dts = a.id_dts and x.id_rdc = '" + retorno.ID_RDC + "')")
                                 .AppendLine("order by a.ds_dts asc");
                             var lista = await conexao._conexao.QueryAsync<TRegistro_Cad_DataSource>(sql.ToString());
-                            foreach(var v in lista)
+                            foreach (var v in lista)
                             {
                                 List<TRegistro_Cad_ParamClasse> lParamRetorno = new List<TRegistro_Cad_ParamClasse>();
                                 const char chaveInicio = '{';
@@ -746,7 +425,7 @@ namespace HelpDeskAPI.DAO.Repository
 
         public async Task<bool> GravarParamClasseAsync(IEnumerable<TRegistro_Cad_ParamClasse> lParamClasse)
         {
-            SqlTransaction t = null;
+            IDbTransaction t = null;
             try
             {
                 using (TConexao conexao = new TConexao(_config.GetConnectionString("conexaoHelp")))
@@ -776,12 +455,12 @@ namespace HelpDeskAPI.DAO.Repository
                     else return false;
                 }
             }
-            catch { t.Rollback();return false; }
+            catch { t.Rollback(); return false; }
         }
 
         public async Task<string> HomologarRDCAsync(TRegistro_Cad_RDC rdc)
         {
-            SqlTransaction t = null;
+            IDbTransaction t = null;
             try
             {
                 using (TConexao conexao = new TConexao(_config.GetConnectionString("conexaoHelp")))
@@ -844,32 +523,28 @@ namespace HelpDeskAPI.DAO.Repository
                     else return "1|Erro abrir conexão banco dados.";
                 }
             }
-            catch(Exception ex) { t.Rollback(); return "1|Erro: " + ex.Message.Trim(); }
+            catch (Exception ex) { t.Rollback(); return "1|Erro: " + ex.Message.Trim(); }
         }
-        public async Task<IEnumerable<Boleto>> GetBoletosLBSystemAsync(string doc)
+        public async Task<IEnumerable<Boleto>> GetBoletosAsync(string doc)
         {
             try
             {
                 StringBuilder sql = new StringBuilder();
-                sql.AppendLine("select a.ID_Config, a.CodigoCedente, a.PostoCedente, b.Nr_Agencia,")
-                    .AppendLine("a.ChaveTransacaoSicredi, a.DT_ExpiracaoChave, c.Url_Autenticacao,")
-                    .AppendLine("c.Url_API, a.Token")
-                    .AppendLine("from TB_COB_CfgBanco a")
-                    .AppendLine("inner join TB_FIN_ContaGer b")
-                    .AppendLine("on a.CD_ContaGer = b.CD_ContaGer")
-                    .AppendLine("inner join TB_FIN_Banco c")
-                    .AppendLine("on b.CD_Banco = c.CD_Banco")
-                    .AppendLine("where b.CD_Banco = '748'")
-                    .AppendLine("and ISNULL(a.ST_Registro, 'A') <> 'C'");
-                using (TConexao conexao = new TConexao(_config.GetConnectionString("conexaoLB")))
+                sql.AppendLine("select b.NRDOC")
+                    .AppendLine("from tb_cliente a")
+                    .AppendLine("inner join TB_PARCEIRO b")
+                    .AppendLine("on a.IDPARCEIRO = b.IDPARCEIRO")
+                    .AppendLine("where isnull(a.INATIVO, 0) = 0")
+                    .AppendLine($"and dbo.FVALIDA_NUMEROS(a.NRDOC) = '{doc.SoNumero()}'");
+                using (TConexao conexao = new TConexao(_config.GetConnectionString("conexaoCRM")))
                 {
                     if (await conexao.OpenConnectionAsync())
                     {
-                        ConfigBanco config = await conexao._conexao.QueryFirstOrDefaultAsync<ConfigBanco>(sql.ToString());
-                        if (config != null)
+                        string docparceiro = await conexao._conexao.ExecuteScalarAsync<string>(sql.ToString());
+                        if (!string.IsNullOrWhiteSpace(docparceiro))
                         {
                             sql = new StringBuilder();
-                            sql.AppendLine("select a.DT_Emissao, b.DT_Vencto, b.Vl_Atual, c.NossoNumero, g.cd_banco")
+                            sql.AppendLine("select a.DT_Emissao, b.DT_Vencto, b.Vl_Atual, c.NossoNumero, g.cd_banco, c.pdf_boleto")
                                 .AppendLine("from TB_FIN_Duplicata a")
                                 .AppendLine("inner join VTB_FIN_PARCELA b")
                                 .AppendLine("on a.CD_Empresa = b.CD_Empresa")
@@ -890,13 +565,12 @@ namespace HelpDeskAPI.DAO.Repository
                                 .AppendLine("inner join TB_FIN_ContaGer g")
                                 .AppendLine("on f.cd_contager = g.cd_contager")
                                 .AppendLine("where dbo.FVALIDA_NUMEROS(case when d.TP_Pessoa = 'F' then d.NR_CPF else d.NR_CGC end) in(" + doc + ")");
-                            IEnumerable<Boleto> boletos = await conexao._conexao.QueryAsync<Boleto>(sql.ToString());
-                            boletos.ToList()
-                                .ForEach(p => p.NossoNumero += Utilitario.Mod11(config.Nr_Agencia.Trim().PadLeft(4, '0') +
-                                                                                config.PostoCedente.Trim().PadLeft(2, '0') +
-                                                                                config.CodigoCedente.Trim().PadLeft(5, '0') +
-                                                                                p.NossoNumero.SoNumero(), 9, false, 0).ToString());
-                            return boletos;
+                            using (TConexao con = new TConexao(_config.GetConnectionString(docparceiro.SoNumero())))
+                            {
+                                if (await con.OpenConnectionAsync())
+                                    return await con._conexao.QueryAsync<Boleto>(sql.ToString());
+                                else return null;
+                            }
                         }
                         else return null;
                     }
@@ -904,117 +578,6 @@ namespace HelpDeskAPI.DAO.Repository
                 }
             }
             catch { return null; }
-        }
-        public async Task<string> GetPDFBoletoSicrediAsync(string cd_banco, string nosso_numero)
-        {
-            try
-            {
-                StringBuilder sql = new StringBuilder();
-                sql.AppendLine("select a.ID_Config, a.CodigoCedente, a.PostoCedente, b.Nr_Agencia,")
-                    .AppendLine("a.ChaveTransacaoSicredi, a.DT_ExpiracaoChave, c.Url_Autenticacao,")
-                    .AppendLine("c.Url_API, a.Token, b.CertificadoPfx, b.SenhaPfx,")
-                    .AppendLine("b.Client_secret, b.Client_id")
-                    .AppendLine("from TB_COB_CfgBanco a")
-                    .AppendLine("inner join TB_FIN_ContaGer b")
-                    .AppendLine("on a.CD_ContaGer = b.CD_ContaGer")
-                    .AppendLine("inner join TB_FIN_Banco c")
-                    .AppendLine("on b.CD_Banco = c.CD_Banco")
-                    .AppendLine("where b.CD_Banco = '" + cd_banco + "'")
-                    .AppendLine("and ISNULL(a.ST_Registro, 'A') <> 'C'");
-                using (TConexao conexao = new TConexao(_config.GetConnectionString("conexaoLB")))
-                {
-                    if (await conexao.OpenConnectionAsync())
-                    {
-                        ConfigBanco config = await conexao._conexao.QueryFirstOrDefaultAsync<ConfigBanco>(sql.ToString());
-                        if (config != null)
-                        {
-                            if (cd_banco.Trim().Equals("748"))
-                            {
-                                HttpClient client = new HttpClient();
-                                HttpResponseMessage response;
-                                if (!config.DT_ExpiracaoChave.HasValue ? true : config.DT_ExpiracaoChave.Value < DateTime.Now)
-                                {
-                                    client = new HttpClient();
-                                    client.BaseAddress = new Uri(config.Url_Autenticacao);
-                                    client.DefaultRequestHeaders.Add("token", config.Token);
-                                    response = await client.PostAsync("/sicredi-cobranca-ws-ecomm-api/ecomm/v1/boleto/autenticacao", null);
-                                    if (response.IsSuccessStatusCode)
-                                    {
-                                        var res = await response.Content.ReadAsStringAsync();
-                                        TokenSicredi tk = JsonConvert.DeserializeObject<TokenSicredi>(res);
-                                        config.ChaveTransacaoSicredi = tk.chaveTransacao;
-                                        config.DT_ExpiracaoChave = tk.dataExpiracao;
-                                        DynamicParameters param = new DynamicParameters();
-                                        param.Add("@CHAVE", config.ChaveTransacaoSicredi);
-                                        param.Add("@DATA", config.DT_ExpiracaoChave);
-                                        param.Add("@ID", config.Id_config);
-                                        await conexao._conexao.ExecuteAsync("update TB_COB_CfgBanco set ChaveTransacaoSicredi = @CHAVE, " +
-                                                                            "DT_ExpiracaoChave = @DATA, dt_alt = getdate() " +
-                                                                            "where ID_Config = @ID", param);
-                                    }
-                                }
-                                client = new HttpClient();
-                                client.BaseAddress = new Uri(config.Url_API);
-                                client.DefaultRequestHeaders.Add("token", config.ChaveTransacaoSicredi);
-                                string consulta = "agencia=" + config.Nr_Agencia.SoNumero() +
-                                                  "&cedente=" + config.CodigoCedente.SoNumero() +
-                                                  "&nossoNumero=" + nosso_numero.SoNumero() +
-                                                  "&posto=" + config.PostoCedente.SoNumero();
-                                response = await client.GetAsync("/sicredi-cobranca-ws-ecomm-api/ecomm/v1/boleto/impressao?" + consulta);
-                                if (response.IsSuccessStatusCode)
-                                {
-                                    BoletoSicrediPdf pdf = JsonConvert.DeserializeObject<BoletoSicrediPdf>(await response.Content.ReadAsStringAsync());
-                                    return pdf.arquivo;
-                                }
-                                else return string.Empty;
-                            }
-                            else if (cd_banco.Trim().Equals("077"))
-                            {
-                                HttpClientHandler handler = new HttpClientHandler();
-                                handler.ClientCertificates.Add(new X509Certificate2(config.CertificadoPfx, config.SenhaPfx));
-                                handler.ClientCertificateOptions = ClientCertificateOption.Manual;
-                                handler.SslProtocols = System.Security.Authentication.SslProtocols.Tls12;
-                                using (var client = new HttpClient(handler))
-                                {
-                                    var response = await client.PostAsync(config.Url_API + "/oauth/v2/token",
-                                        new FormUrlEncodedContent(
-                                            new List<KeyValuePair<string, string>>
-                                            {
-                                                new KeyValuePair<string, string>("client_id", config.Client_id),
-                                                new KeyValuePair<string, string>("client_secret", config.Client_secret),
-                                                new KeyValuePair<string, string>("grant_type", "client_credentials"),
-                                                new KeyValuePair<string, string>("scope", "extrato.read boleto-cobranca.read boleto-cobranca.write")
-                                            }));
-                                    if (response.IsSuccessStatusCode)
-                                    {
-                                        TokenInter tokenInter = JsonConvert.DeserializeObject<TokenInter>(await response.Content.ReadAsStringAsync());
-                                        if (tokenInter != null)
-                                        {
-                                            client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue(tokenInter.token_type, tokenInter.access_token);
-                                            var url = string.Concat(config.Url_API, String.Format("/cobranca/v2/boletos/{0}/pdf", nosso_numero));
-                                            response = await client.GetAsync(url);
-                                            if (response.IsSuccessStatusCode)
-                                            {
-                                                var pdf = JsonConvert.DeserializeObject<BoletoPdfInter>(await response.Content.ReadAsStringAsync());
-                                                if (pdf != null)
-                                                    return pdf.pdf;
-                                                else return string.Empty;
-                                            }
-                                            else return string.Empty;
-                                        }
-                                        else return string.Empty;
-                                    }
-                                    else return string.Empty;
-                                }
-                            }
-                            else return string.Empty;
-                        }
-                        else return string.Empty;
-                    }
-                    else return string.Empty;
-                }
-            }
-            catch { return string.Empty; }
         }
     }
 }

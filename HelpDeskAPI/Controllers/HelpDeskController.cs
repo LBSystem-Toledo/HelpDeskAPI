@@ -13,121 +13,7 @@ namespace HelpDeskAPI.Controllers
     {
         private readonly IHelpDesk _helpDeskDAO;
         public HelpDeskController(IHelpDesk helpDeskDAO) { _helpDeskDAO = helpDeskDAO; }
-
-        [HttpGet, Route("ValidarEmpresaMobile")]
-        public async Task<IActionResult> ValidarEmpresaMobile()
-        {
-            try
-            {
-                var retorno = await _helpDeskDAO.ValidarEmpresaMobileAsync(Request.Headers["nr_doc"].ToString());
-                return Ok(retorno);
-            }
-            catch { return NotFound(); }
-        }
-
-        [HttpGet, Route("TerminaisMobile")]
-        public async Task<IActionResult> TerminaisMobile()
-        {
-            try
-            {
-                var retorno = await _helpDeskDAO.TerminaisMobileAsync(Request.Headers["nr_doc"].ToString());
-                return Ok(retorno);
-            }
-            catch { return NotFound(); }
-        }
-
-        [HttpPost, Route("NovoTicket")]
-        public async Task<IActionResult> NovoTicket(Ticket ticket)
-        {
-            try
-            {
-                await _helpDeskDAO.NovoTicketAsync(ticket);
-                return Ok();
-            }
-            catch { return NotFound(); }
-        }
-
-        [HttpPost, Route("NovoHistorico")]
-        public async Task<IActionResult> NovoHistorico(HistEvolucao historico)
-        {
-            try
-            {
-                await _helpDeskDAO.NovoHistoricoAsync(historico);
-                return Ok();
-            }
-            catch { return NotFound(); }
-        }
-
-        [HttpPost, Route("EvoluirTicketCliente")]
-        public async Task<IActionResult> EvoluirTicketCliente(HistEvolucao evolucao)
-        {
-            try
-            {
-                await _helpDeskDAO.EvoluirTicketClienteAsync(evolucao);
-                return Ok();
-            }
-            catch { return NotFound(); }
-        }
-
-        [HttpGet, Route("TicketsERP")]
-        public async Task<IActionResult> TicketsERP([FromQuery]string LoginCliente, [FromQuery]string Dt_etapa)
-        {
-            try
-            {
-                var lista = await _helpDeskDAO.TicketsERP(LoginCliente, Dt_etapa);
-                return Ok(lista);
-            }
-            catch { return NotFound(); }
-        }
-
-        [HttpGet, Route("ValidarLogin")]
-        public async Task<IActionResult> ValidarLogin([FromQuery]string login, 
-                                                      [FromQuery]string senha, 
-                                                      [FromQuery]string Cnpj)
-        {
-            try
-            {
-                var ret = await _helpDeskDAO.ValidarLoginAsync(login, senha, Cnpj);
-                return Ok(ret);
-            }
-            catch { return NotFound(); }
-        }
-
-        [HttpGet, Route("ValidarOperador")]
-        public async Task<IActionResult> ValidarOperador([FromQuery] string login,
-                                                         [FromQuery] string senha)
-        {
-            try
-            {
-                if (await _helpDeskDAO.ValidarOperador(login, senha))
-                    return Ok();
-                else return NotFound();
-            }
-            catch { return NotFound(); }
-        }
-
-        [HttpGet, Route("BuscarEvolucao")]
-        public async Task<IActionResult> BuscarEvolucao([FromQuery] string id_ticket)
-        {
-            try
-            {
-                var lista = await _helpDeskDAO.BuscarEvolucaoAsync(id_ticket);
-                return Ok(lista);
-            }
-            catch { return NotFound(); }
-        }
-
-        [HttpGet, Route("BuscarAnexo")]
-        public async Task<IActionResult> BuscarAnexo([FromQuery] string id_ticket,
-                                                     [FromQuery] string id_evolucao)
-        {
-            try
-            {
-                var lista = await _helpDeskDAO.BuscarAnexoAsync(id_ticket, id_evolucao);
-                return Ok(lista);
-            }
-            catch { return NotFound(); }
-        }
+        
         [HttpGet, Route("CalcularSerial")]
         public async Task<IActionResult> CalcularSerial([FromQuery]string cnpj_cliente,
                                                         [FromQuery]string dt_servidor,
@@ -230,24 +116,13 @@ namespace HelpDeskAPI.Controllers
             catch { return NotFound(); }
         }
 
-        [HttpGet, Route("GetBoletosLBSystemAsync")]
+        [HttpGet, Route("GetBoletosAsync")]
         public async Task<IActionResult> GetBoletosLBSystemAsync([FromQuery] string doc)
         {
             try
             {
-                var lista = await _helpDeskDAO.GetBoletosLBSystemAsync(doc);
+                var lista = await _helpDeskDAO.GetBoletosAsync(doc);
                 return Ok(lista);
-            }
-            catch { return NotFound(); }
-        }
-        [HttpGet, Route("GetPDFBoletoLBSystemAsync")]
-        public async Task<IActionResult> GetPDFBoletoSicrediAsync([FromQuery] string cd_banco, 
-                                                                  [FromQuery] string nosso_numero)
-        {
-            try
-            {
-                string pdf = await _helpDeskDAO.GetPDFBoletoSicrediAsync(cd_banco, nosso_numero);
-                return Ok(pdf);
             }
             catch { return NotFound(); }
         }
