@@ -40,7 +40,7 @@ namespace HelpDeskAPI.DAO.Repository
                     .AppendLine("inner join TB_PARCEIRO b")
                     .AppendLine("on a.IDPARCEIRO = b.IDPARCEIRO")
                     .AppendLine("where isnull(a.INATIVO, 0) = 0")
-                    .AppendLine("and dbo.FVALIDA_NUMEROS(a.NRDOC) in(" + cnpj_cliente.SoNumero().Trim() + ")");
+                    .AppendLine("and dbo.FVALIDA_NUMEROS(a.NRDOC) in(" + cnpj_cliente + ")");
                 using (TConexao conexao = new TConexao(_config.GetConnectionString("conexaoCRM")))
                 {
                     if (await conexao.OpenConnectionAsync())
@@ -535,7 +535,7 @@ namespace HelpDeskAPI.DAO.Repository
                     .AppendLine("inner join TB_PARCEIRO b")
                     .AppendLine("on a.IDPARCEIRO = b.IDPARCEIRO")
                     .AppendLine("where isnull(a.INATIVO, 0) = 0")
-                    .AppendLine($"and dbo.FVALIDA_NUMEROS(a.NRDOC) = '{doc.SoNumero()}'");
+                    .AppendLine($"and dbo.FVALIDA_NUMEROS(a.NRDOC) in({doc})");
                 using (TConexao conexao = new TConexao(_config.GetConnectionString("conexaoCRM")))
                 {
                     if (await conexao.OpenConnectionAsync())
@@ -564,7 +564,7 @@ namespace HelpDeskAPI.DAO.Repository
                                 .AppendLine("on c.id_config = f.id_config")
                                 .AppendLine("inner join TB_FIN_ContaGer g")
                                 .AppendLine("on f.cd_contager = g.cd_contager")
-                                .AppendLine("where dbo.FVALIDA_NUMEROS(case when d.TP_Pessoa = 'F' then d.NR_CPF else d.NR_CGC end) in(" + doc + ")");
+                                .AppendLine($"where dbo.FVALIDA_NUMEROS(case when d.TP_Pessoa = 'F' then d.NR_CPF else d.NR_CGC end) in({doc})");
                             using (TConexao con = new TConexao(_config.GetConnectionString(docparceiro.SoNumero())))
                             {
                                 if (await con.OpenConnectionAsync())
